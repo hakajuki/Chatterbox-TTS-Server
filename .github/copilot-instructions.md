@@ -27,6 +27,19 @@ This file gives focused, actionable guidance so an AI coding agent can be produc
 5) Integration & external dependencies
 - Models are downloaded via Hugging Face using `ChatterboxTTS.from_pretrained()`; `download_model.py` can prefetch artifacts. Model repo selection and HF cache path are configurable via `config.yaml`.
 - Optional audio tools: `ffmpeg`, `libsndfile1`, and `parselmouth` may be used for post-processing; guard code paths if these are missing.
+ - Utility scripts: `ui/beep-server.py` depends on `faster-whisper`, `pydub`, and `torch` (GPU optional). Treat it as a developer utility — it runs locally on audio files and is not invoked by the main server. When editing or reusing it, ensure the environment includes `faster-whisper` and `pydub` and that required model weights are available.
+
+6a) `ui/beep-server.py` quick notes
+- Purpose: detect profanity/forbidden words via speech-to-text timestamps and replace the corresponding audio ranges with a beep audio segment. Useful for creating censored preview clips.
+- Key variables: `BAD_WORDS` (list of tokens — expand with local-language tokens like Vietnamese slang), `beep_path` (path to beep wav), `min_gap_sec` (how close words are grouped), and `model_size` (e.g., `small.en`).
+- Hardware: the script auto-selects `device = 'cuda' if torch.cuda.is_available() else 'cpu'` and chooses `compute_type` (`float16` on CUDA, `int8` otherwise).
+- Quick run: the script includes an example invocation at the bottom; you can run it directly:
+
+```bash
+python ui/beep-server.py
+```
+
+- Caution: The `BAD_WORDS` list contains explicit terms; avoid committing additions with offensive content to public branches. Consider keeping a localized words file out-of-repo or loading from `config.yaml` if you need localization.
 
 6) Debugging pointers (where to look first)
 - API docs: visit `/docs` when server is running to inspect request/response schemas.
@@ -41,6 +54,7 @@ This file gives focused, actionable guidance so an AI coding agent can be produc
 - `ui/presets.yaml` — example presets and paralinguistic tag usage
 - `voices/` — predefined voice artifacts and expected layout
 - `download_model.py` — pre-download helper for Hugging Face artifacts
+- `ui/beep-server.py` — local utility that censors audio by detecting "bad words" using `faster-whisper` and replacing them with a beep (`pydub` audio edits). It's a standalone script (not integrated into the FastAPI endpoints); it accepts input/output file paths and is configurable via the `BAD_WORDS` list and `min_gap_sec` parameter.
 
 8) What not to change without extra care
 - API surface (endpoint names, param names) used by the UI and Colab demo — changing these requires coordinated UI updates in `ui/` and docs in `README.md`.

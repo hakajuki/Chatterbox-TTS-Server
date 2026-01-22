@@ -303,5 +303,5 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 
     // --- Initialize ---
-    fetchInitialData();
+    // fetchInitialData();
 });

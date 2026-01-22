@@ -64,3 +64,47 @@ tqdm                          # Progress bars for loops
 #    - libsndfile (for soundfile package)
 #    - FFmpeg (for some audio processing features)
 # ============================================================================
+
+# ============================================================================
+# APPLE SILICON (macOS) / MPS INSTALLATION NOTES
+# ============================================================================
+# Recommended workflow for Apple Silicon (M1/M2/M3, 2021+ MacBook Pro) when
+# you want to use the Metal Performance Shaders (MPS) backend for PyTorch:
+# 1) Upgrade pip in your venv:
+#
+#    python -m pip install --upgrade pip
+#
+# 2) Install PyTorch with macOS/MPS support using the official PyTorch
+#    installer command. Visit https://pytorch.org/get-started/locally/ and
+#    select "Mac" + your package manager to obtain the correct command.
+#    Example (may change over time):
+#
+#    pip install torch torchvision torchaudio
+#
+#    Note: the official PyTorch wheel for macOS includes the MPS backend when
+#    run on Apple Silicon. Always prefer the command from the PyTorch web
+#    installer to ensure compatibility with your Python version.
+#
+# 3) After PyTorch is installed, install the remaining Python dependencies
+#    listed below (these are the same as the CPU requirements but exclude
+#    `torch`, `torchvision`, and `torchaudio` which you installed above):
+#
+#    pip install -r requirements.txt --no-deps
+#
+#    Or to install the remaining packages explicitly:
+#
+#    pip install fastapi uvicorn[standard] numpy librosa safetensors descript-audio-codec \
+#        soundfile pydub audiotsm praat-parselmouth python-multipart requests Jinja2 \
+#        aiofiles hf_transfer PyYAML watchdog unidecode inflect tqdm
+#
+# 4) System dependencies: On macOS you may still need `ffmpeg` installed for
+#    certain audio operations (recommended via Homebrew: `brew install ffmpeg`).
+#
+# Troubleshooting:
+# - If you encounter import-time errors for `praat-parselmouth`, install
+#   system prerequisites or consult the package docs. If `soundfile` fails,
+#   install `libsndfile` via Homebrew: `brew install libsndfile`.
+# - If you need GPU-accelerated behavior on Apple Silicon, verify MPS
+#   availability with: `python -c "import torch; print(torch.backends.mps.is_available())"`
+#
+# ============================================================================

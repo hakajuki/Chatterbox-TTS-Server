@@ -1,0 +1,50 @@
+# Requirements for macOS (Apple Silicon) with MPS acceleration
+# Usage: install PyTorch with MPS support first (see instructions below),
+# then install the packages in this file into your virtualenv.
+
+# 1) Upgrade pip
+# python -m pip install --upgrade pip
+
+# 2) Install PyTorch with MPS support
+# Visit https://pytorch.org/get-started/locally/ and choose "Mac" + "pip"
+# Example (use the exact command from the website for your Python version):
+# python -m pip install torch torchvision torchaudio
+
+# 3) Install the remaining dependencies from this file
+# python -m pip install -r requirements-macos-mps.txt
+
+# --- Core packages (exclude torch/torchvision/torchaudio which you installed above) ---
+fastapi
+uvicorn[standard]
+numpy>=1.24.0,<1.26.0
+librosa
+safetensors
+descript-audio-codec
+
+# Audio I/O & processing
+soundfile
+pydub
+audiotsm
+praat-parselmouth
+
+# Web & API utilities
+python-multipart
+requests
+Jinja2
+aiofiles
+hf_transfer
+
+# Config & helpers
+PyYAML
+watchdog
+unidecode
+inflect
+tqdm
+
+# Optional / utilities
+faster-whisper
+
+# Notes:
+# - Install system deps via Homebrew if needed: `brew install ffmpeg libsndfile`
+# - If `praat-parselmouth` fails to build, consult its docs for system prerequisites.
+# - `faster-whisper` will download required Whisper model weights on first run if not present.
