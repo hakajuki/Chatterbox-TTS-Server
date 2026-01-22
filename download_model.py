@@ -8,6 +8,13 @@ import os
 from pathlib import Path
 from huggingface_hub import hf_hub_download
 
+from huggingface_hub import login
+
+# Thay bằng token thật của bạn
+hf_token = "hf_YourHuggingFaceTokenHere"  
+
+login(token=hf_token)
+
 # Configure basic logging for the script
 logging.basicConfig(
     level=logging.INFO,
