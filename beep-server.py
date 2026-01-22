@@ -19,6 +19,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.background import BackgroundTask
 from pydub import AudioSegment
 
+
 # --- Logging Configuration ---
 logging.basicConfig(
     level=logging.INFO,
@@ -30,7 +31,7 @@ logger = logging.getLogger(__name__)
 # --- Global Configuration ---
 DEFAULT_MODEL_SIZE = "small.en"
 DEFAULT_MIN_GAP_SEC = 0.1
-DEFAULT_BEEP_PATH = Path(__file__).parent / "beep.wav"
+DEFAULT_BEEP_PATH = Path(__file__).parent / "assets/censor-beep.wav"
 
 # Device selection: prefer CUDA, then Apple MPS, else CPU
 if torch.cuda.is_available():
@@ -93,9 +94,11 @@ def censor_audio_with_beep(
         bad_timestamps = []
         detected_words = []
         for segment in segments:
+            print(f"Word: {segment.text} from {segment.start:.2f}s to {segment.end:.2f}s")
             for word_info in segment.words:
                 word = word_info.word.strip().lower().rstrip('.,!?')
-                if word in bad_words or any(bw in word for bw in bad_words):
+                # print(f"Word: '{word}' from {word_info.start:.2f}s to {word_info.end:.2f}s")
+                if word in bad_words: # or any(bw in word for bw in bad_words):
                     bad_timestamps.append((word_info.start, word_info.end))
                     detected_words.append(word)
                     logger.info(f"Detected: '{word}' at {word_info.start:.2f}s - {word_info.end:.2f}s")
@@ -194,7 +197,7 @@ app.add_middleware(
 )
 
 # Serve static files (UI assets)
-ui_path = Path(__file__).parent
+ui_path = Path(__file__).parent / "ui"
 if ui_path.is_dir():
     app.mount("/static", StaticFiles(directory=str(ui_path)), name="static")
     # Also serve vendor assets (e.g. wavesurfer) at /vendor
@@ -301,6 +304,7 @@ async def censor_audio_endpoint(
                 "X-Groups-Censored": str(result["groups_censored"]),
                 "X-Detected-Words": ",".join(result["detected_words"])
             },
+            # background=lambda: shutil.rmtree(temp_dir, ignore_errors=True)
             background=BackgroundTask(shutil.rmtree, str(temp_dir), True)
         )
         
