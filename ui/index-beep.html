@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Beep Sync TTS Server</title>
+    <link rel="stylesheet" href="styles.css">
+    <script src="vendor/wavesurfer.min.js"></script>
+</head>
+
+<body>
+    <div class="page">
+        <!-- Navigation Bar -->
+        <nav class="navbar">
+            <div class="container">
+                <div class="navbar__inner">
+                    <div class="navbar__brand">
+                        <a href="/" id="app-title-link" class="navbar__title">Beep Sync TTS Server</a>
+                        <div id="model-indicator" class="hidden">
+                            <span id="model-badge" class="model-badge">
+                                <span id="model-badge-icon" class="model-badge__indicator"></span>
+                                <span id="model-badge-text">Loading...</span>
+                            </span>
+                        </div>
+                    </div>
+                    <div class="navbar__actions">
+                        <button id="theme-toggle-btn" type="button" class="theme-toggle" title="Toggle light/dark mode">
+                            <span class="sr-only">Toggle theme</span>
+                            <span class="theme-toggle__thumb">
+                                <svg class="theme-toggle__icon-sun" xmlns="http://www.w3.org/2000/svg"
+                                    viewBox="0 0 24 24" fill="currentColor">
+                                    <path
+                                        d="M12 2.25a.75.75 0 01.75.75v2.25a.75.75 0 01-1.5 0V3a.75.75 0 01.75-.75zM7.5 12a4.5 4.5 0 119 0 4.5 4.5 0 01-9 0zM18.894 6.166a.75.75 0 00-1.06-1.06l-1.591 1.59a.75.75 0 101.06 1.061l1.591-1.59zM21.75 12a.75.75 0 01-.75.75h-2.25a.75.75 0 010-1.5H21a.75.75 0 01.75.75zM17.834 18.894a.75.75 0 001.06-1.06l-1.59-1.591a.75.75 0 10-1.061 1.06l1.59 1.591zM12 18a.75.75 0 01.75.75V21a.75.75 0 01-1.5 0v-2.25A.75.75 0 0112 18zM7.758 17.303a.75.75 0 00-1.061-1.06l-1.591 1.59a.75.75 0 001.06 1.061l1.591-1.59zM6 12a.75.75 0 01-.75.75H3a.75.75 0 010-1.5h2.25A.75.75 0 016 12zM6.697 7.757a.75.75 0 001.06-1.06l-1.59-1.591a.75.75 0 00-1.061 1.06l1.59 1.591z" />
+                                </svg>
+                                <svg class="theme-toggle__icon-moon" xmlns="http://www.w3.org/2000/svg"
+                                    viewBox="0 0 24 24" fill="currentColor">
+                                    <path fill-rule="evenodd"
+                                        d="M9.528 1.718a.75.75 0 01.162.819A8.97 8.97 0 009 6a9 9 0 009 9 8.97 8.97 0 003.463-.69.75.75 0 01.981.98 10.503 10.503 0 01-9.694 6.46c-5.799 0-10.5-4.701-10.5-10.5 0-4.368 2.667-8.112 6.46-9.694a.75.75 0 01.818.162z"
+                                        clip-rule="evenodd" />
+                                </svg>
+                            </span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </nav>
+
+        <!-- Main Content Area -->
+        <main>
+            <div class="container mt-4">
+                <div id="notification-area" class="mb-6"></div>
+
+                <div class="card">
+                    <form id="tts-form" action="#" method="post" onsubmit="return false;">
+                        <div class="card__body">
+                            <h2 id="tts-form-header" class="card__title">Generate Speech</h2>
+
+                            <!-- Model Selection Section -->
+                            <div id="model-selection-section" class="highlight-box">
+                                <div class="highlight-box__row">
+                                    <div class="form-group inline">
+                                        <label for="model-select" class="form-label">Active Model:</label>
+                                        <select id="model-select" name="model_selector" class="form-select wide">
+                                            <option value="small-en">Whisper small EN</option>
+                                        </select>
+                                    </div>
+                                    <div id="model-status" class="model-status">
+                                        <span id="model-status-indicator" class="status-dot neutral"></span>
+                                        <span id="model-status-text" class="model-status__text">Checking model...</span>
+                                    </div>
+                                    <button id="apply-model-btn" type="button" class="btn secondary wide hidden">
+                                        <svg class="btn__icon" xmlns="http://www.w3.org/2000/svg" fill="none"
+                                            viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+                                            <path stroke-linecap="round" stroke-linejoin="round"
+                                                d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182m0-4.991v4.99" />
+                                        </svg>
+                                        Apply & Restart
+                                    </button>
+                                </div>
+                            </div>
+
+                            <div class="form-group">
+                                <label for="text" class="form-label">Text to synthesize</label>
+                                <p class="form-hint mb-2">
+                                    Enter the text you want to convert to speech. For audiobooks, you can paste long
+                                    chapters.
+                                </p>
+                                <div class="textarea-wrapper">
+                                    <textarea name="text" id="text" rows="8" class="form-textarea"
+                                        placeholder="Enter text here..." required></textarea>
+                                    <div class="textarea-counter">
+                                        <span id="char-count">0</span> Characters
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="flex-row flex-wrap items-center gap-4 mb-6">
+                                <button type="button" id="generate-btn" class="btn primary">
+                                    <svg class="btn__icon" xmlns="http://www.w3.org/2000/svg" fill="none"
+                                        viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+                                        <path stroke-linecap="round" stroke-linejoin="round"
+                                            d="M19.114 5.636a9 9 0 0 1 0 12.728M16.463 8.288a5.25 5.25 0 0 1 0 7.424M6.75 8.25l4.72-4.72a.75.75 0 0 1 1.28.53v15.88a.75.75 0 0 1-1.28.53l-4.72-4.72H4.51c-.88 0-1.704-.507-1.938-1.354A9.009 9.009 0 0 1 2.25 12c0-.83.112-1.633.322-2.396C2.806 8.756 3.63 8.25 4.51 8.25H6.75Z" />
+                                    </svg>
+                                    Beep Sync
+                                </button>
+                            </div>
+                    </form>
+                </div>
+
+                <div id="audio-player-container" class="mt-8"></div>
+
+            </div>
+        </main>
+
+        <footer class="footer">
+            <div class="container">
+                <div class="footer__content">
+                    
+                </div>
+            </div>
+        </footer>
+    </div>
+
+    <!-- Loading Overlay -->
+    <div id="loading-overlay" class="loading hidden opacity-0" data-state="closed" style="display: none;">
+        <div class="loading__box">
+            <svg class="loading__spinner" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                <path class="opacity-75" fill="currentColor"
+                    d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z">
+                </path>
+            </svg>
+            <p id="loading-message" class="loading__title">Generating audio...</p>
+            <p id="loading-status" class="loading__status">Please wait.</p>
+            <button id="loading-cancel-btn" type="button" class="btn secondary"
+                title="Cancel UI request.">Cancel</button>
+        </div>
+    </div>
+
+    <!-- Chunk Warning Modal -->
+    <div id="chunk-warning-modal" class="modal hidden opacity-0" data-state="closed" style="display: none;">
+        <div class="modal__box">
+            <h3 class="modal__title">Chunking Voice Consistency Warning</h3>
+            <div class="modal__content">
+                <p>You are generating with text splitting enabled and not using Predefined Voices or Voice Cloning with
+                    a fixed seed.</p>
+                <p>This combination may result in <strong>different voices for different text chunks</strong>, leading
+                    to inconsistent audio.</p>
+                <p>For consistent voices across chunks, please use:</p>
+                <ul>
+                    <li>"Predefined Voices" mode.</li>
+                    <li>"Voice Cloning" mode.</li>
+                    <li>A specific integer in "Generation Seed" (not random).</li>
+                </ul>
+            </div>
+            <div class="modal__checkbox-row">
+                <input type="checkbox" id="hide-chunk-warning-checkbox" class="form-checkbox">
+                <label for="hide-chunk-warning-checkbox" class="modal__checkbox-label">Do not show this warning
+                    again</label>
+            </div>
+            <div class="modal__actions">
+                <button id="chunk-warning-cancel" type="button" class="btn secondary">Cancel Generation</button>
+                <button id="chunk-warning-ok" type="button" class="btn primary">Proceed Anyway</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Generation Warning Modal -->
+    <div id="generation-warning-modal" class="modal hidden opacity-0" data-state="closed" style="display: none;">
+        <div class="modal__box">
+            <h3 class="modal__title">Generation Quality Notice</h3>
+            <div class="modal__content">
+                <p>Please be aware that text-to-speech models may sometimes produce unexpected results or artifacts.</p>
+                <p>This can include variations in voice consistency, delivery, or minor audio imperfections. Experiment
+                    with parameters for best results.</p>
+            </div>
+            <div class="modal__checkbox-row">
+                <input type="checkbox" id="hide-generation-warning-checkbox" class="form-checkbox">
+                <label for="hide-generation-warning-checkbox" class="modal__checkbox-label">Do not show this warning
+                    again</label>
+            </div>
+            <div class="modal__actions">
+                <button id="generation-warning-acknowledge" type="button" class="btn primary">Acknowledge &
+                    Generate</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="script-beep.js" defer></script>
+</body>
+
+</html>
