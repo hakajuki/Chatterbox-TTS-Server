@@ -10,6 +10,7 @@ document.addEventListener('DOMContentLoaded', function () {
     // --- State ---
     let selectedFile = null;
     let currentAbortController = null;
+    let wavesurfer = null;
 
     // --- DOM Element Selectors ---
     const themeToggleButton = document.getElementById('theme-toggle-btn');
@@ -255,14 +256,20 @@ document.addEventListener('DOMContentLoaded', function () {
         });
     }
 
-    // --- Audio Player Creation ---
+    // --- Audio Player Creation (WaveSurfer-enabled, with fallback) ---
     function createAudioPlayer(audioUrl, stats = {}) {
         if (!audioPlayerContainer) return;
+
+        // clean up previous instance
+        if (wavesurfer) {
+            try { wavesurfer.destroy(); } catch (e) { /* ignore */ }
+            wavesurfer = null;
+        }
 
         audioPlayerContainer.innerHTML = '';
 
         const card = document.createElement('div');
-        card.className = 'card';
+        card.className = 'card audio-player';
 
         const cardBody = document.createElement('div');
         cardBody.className = 'card__body';
@@ -271,25 +278,42 @@ document.addEventListener('DOMContentLoaded', function () {
         title.className = 'card__title';
         title.textContent = 'Censored Audio Result';
 
-        const audio = document.createElement('audio');
-        audio.controls = true;
-        audio.className = 'audio-player';
-        audio.src = audioUrl;
+        // Waveform container (used if WaveSurfer is available)
+        const waveformWrap = document.createElement('div');
+        waveformWrap.className = 'audio-player__waveform-wrap';
+        const waveformDiv = document.createElement('div');
+        waveformDiv.id = 'waveform-beep';
+        waveformDiv.className = 'audio-player__waveform';
+        waveformWrap.appendChild(waveformDiv);
 
-        const downloadBtn = document.createElement('a');
-        downloadBtn.href = audioUrl;
-        downloadBtn.download = 'censored_audio.wav';
-        downloadBtn.className = 'btn secondary';
-        downloadBtn.innerHTML = `
-            <svg class="btn__icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3" />
-            </svg>
-            Download Censored Audio
-        `;
+        // Controls container
+        const controlsDiv = document.createElement('div');
+        controlsDiv.className = 'audio-player__controls';
+
+        const playBtn = document.createElement('button');
+        playBtn.className = 'btn primary';
+        playBtn.disabled = true;
+        playBtn.innerHTML = '<span>Play</span>';
+
+        const downloadLink = document.createElement('a');
+        downloadLink.className = 'btn secondary';
+        downloadLink.href = audioUrl;
+        downloadLink.download = 'censored_audio.wav';
+        downloadLink.innerHTML = 'Download Censored Audio';
+
+        // Time display
+        const timeSpan = document.createElement('span');
+        timeSpan.className = 'audio-time';
+        timeSpan.style.margin = '0 8px';
+        timeSpan.textContent = '0:00 / 0:00';
+
+        controlsDiv.appendChild(playBtn);
+        controlsDiv.appendChild(timeSpan);
+        controlsDiv.appendChild(downloadLink);
 
         cardBody.appendChild(title);
-        cardBody.appendChild(audio);
-        
+        cardBody.appendChild(waveformWrap);
+
         if (stats.detected_count !== undefined) {
             const statsDiv = document.createElement('div');
             statsDiv.className = 'form-hint mt-4';
@@ -304,12 +328,112 @@ document.addEventListener('DOMContentLoaded', function () {
             `;
             cardBody.appendChild(statsDiv);
         }
-        
-        cardBody.appendChild(downloadBtn);
+
+        cardBody.appendChild(controlsDiv);
         card.appendChild(cardBody);
         audioPlayerContainer.appendChild(card);
 
+        // If WaveSurfer is available, use it for waveform playback
+        if (window.WaveSurfer) {
+            const isDark = document.documentElement.classList.contains('dark');
+            wavesurfer = WaveSurfer.create({
+                container: '#waveform-beep',
+                waveColor: isDark ? '#6366f1' : '#a5b4fc',
+                progressColor: isDark ? '#4f46e5' : '#6366f1',
+                cursorColor: isDark ? '#cbd5e1' : '#475569',
+                barWidth: 3,
+                barRadius: 3,
+                cursorWidth: 1,
+                height: 80,
+                barGap: 2,
+                responsive: true,
+                normalize: true,
+                url: audioUrl,
+            });
+
+            wavesurfer.on('ready', () => {
+                const duration = wavesurfer.getDuration() || 0;
+                timeSpan.textContent = `0:00 / ${formatTime(duration)}`;
+                playBtn.disabled = false;
+                playBtn.onclick = () => {
+                    if (wavesurfer.isPlaying()) {
+                        wavesurfer.pause();
+                        playBtn.innerText = 'Play';
+                    } else {
+                        wavesurfer.play();
+                        playBtn.innerText = 'Pause';
+                    }
+                };
+                wavesurfer.on('audioprocess', () => {
+                    const current = wavesurfer.getCurrentTime() || 0;
+                    timeSpan.textContent = `${formatTime(current)} / ${formatTime(duration)}`;
+                });
+            });
+            wavesurfer.on('finish', () => {
+                playBtn.innerText = 'Play';
+                wavesurfer.seekTo(0);
+            });
+            wavesurfer.on('error', (err) => {
+                console.error('WaveSurfer error:', err);
+                showNotification('Error loading audio waveform', 'error');
+                // fallback to basic audio element
+                renderFallbackAudio(audioUrl, cardBody, controlsDiv, playBtn, downloadLink);
+            });
+        } else {
+            // WaveSurfer not present: fallback
+            renderFallbackAudio(audioUrl, cardBody, controlsDiv, playBtn, downloadLink);
+        }
+    }
+
+    function renderFallbackAudio(audioUrl, cardBody, controlsDiv, playBtn, downloadLink) {
+        // Remove waveform area if exists
+        const wf = cardBody.querySelector('.audio-player__waveform');
+        if (wf && wf.parentNode) wf.parentNode.removeChild(wf);
+
+        const audio = document.createElement('audio');
+        audio.controls = true;
+        audio.src = audioUrl;
+        audio.style.width = '100%';
+
+        // replace controls: enable play button to toggle the audio element
+        playBtn.disabled = false;
+        playBtn.onclick = () => {
+            if (audio.paused) {
+                audio.play();
+                playBtn.innerText = 'Pause';
+            } else {
+                audio.pause();
+                playBtn.innerText = 'Play';
+            }
+        };
+
+        // insert audio before controls
+        cardBody.insertBefore(audio, controlsDiv);
+
+        // ensure download link uses audioUrl
+        downloadLink.href = audioUrl;
+        downloadLink.download = 'censored_audio.wav';
+
+        const timeSpan = cardBody.querySelector('.audio-time');
+        audio.addEventListener('loadedmetadata', () => {
+            const dur = audio.duration || 0;
+            if (timeSpan) timeSpan.textContent = `0:00 / ${formatTime(dur)}`;
+        });
+        audio.addEventListener('timeupdate', () => {
+            const cur = audio.currentTime || 0;
+            const dur = audio.duration || 0;
+            if (timeSpan) timeSpan.textContent = `${formatTime(cur)} / ${formatTime(dur)}`;
+        });
+
+        // autoplay attempt
         audio.play().catch(() => {});
+    }
+
+    function formatTime(seconds) {
+        const s = Math.floor(seconds || 0);
+        const m = Math.floor(s / 60);
+        const sec = s % 60;
+        return `${m}:${sec.toString().padStart(2, '0')}`;
     }
 
     // --- Censor Audio Request ---
