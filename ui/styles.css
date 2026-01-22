@@ -1810,3 +1810,109 @@ a.btn.disabled {
         justify-content: center;
     }
 }
+
+/* ============================================
+   File Upload Components (Beep Sync)
+   ============================================ */
+
+.file-drop-zone {
+    border: 2px dashed var(--color-border-default);
+    border-radius: var(--radius-lg);
+    padding: 3rem 2rem;
+    text-align: center;
+    background: var(--color-bg-input);
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.file-drop-zone:hover {
+    border-color: var(--color-primary);
+    background: var(--color-bg-accent);
+}
+
+.file-drop-zone.dragover {
+    border-color: var(--color-primary);
+    background: var(--color-bg-accent);
+    transform: scale(1.02);
+}
+
+.file-drop-zone__icon {
+    width: 3rem;
+    height: 3rem;
+    margin: 0 auto 1rem;
+    color: var(--color-text-muted);
+}
+
+.file-drop-zone__text {
+    font-size: var(--text-base);
+    color: var(--color-text-secondary);
+    margin-bottom: 0.5rem;
+}
+
+.file-drop-zone__browse {
+    color: var(--color-primary);
+    font-weight: 600;
+}
+
+.file-drop-zone__hint {
+    font-size: var(--text-sm);
+    color: var(--color-text-muted);
+}
+
+.file-info {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    padding: 1rem;
+    background: var(--color-bg-surface-alt);
+    border: 1px solid var(--color-border-subtle);
+    border-radius: var(--radius-md);
+}
+
+.file-info__icon {
+    width: 2.5rem;
+    height: 2.5rem;
+    color: var(--color-primary);
+    flex-shrink: 0;
+}
+
+.file-info__details {
+    flex: 1;
+}
+
+.file-info__name {
+    font-weight: 600;
+    color: var(--color-text-primary);
+    margin-bottom: 0.25rem;
+}
+
+.file-info__size {
+    font-size: var(--text-sm);
+    color: var(--color-text-muted);
+}
+
+.file-info__remove {
+    background: transparent;
+    border: none;
+    color: var(--color-text-muted);
+    cursor: pointer;
+    padding: 0.5rem;
+    border-radius: var(--radius-sm);
+    transition: all 0.2s ease;
+}
+
+.file-info__remove:hover {
+    color: var(--color-error);
+    background: var(--color-error-bg);
+}
+
+.file-info__remove svg {
+    width: 1.25rem;
+    height: 1.25rem;
+}
+
+.audio-player {
+    width: 100%;
+    margin-top: 1rem;
+    border-radius: var(--radius-md);
+}

@@ -54,55 +54,61 @@
                 <div class="card">
                     <form id="tts-form" action="#" method="post" onsubmit="return false;">
                         <div class="card__body">
-                            <h2 id="tts-form-header" class="card__title">Generate Speech</h2>
+                            <h2 id="tts-form-header" class="card__title">Audio Censorship Tool</h2>
 
-                            <!-- Model Selection Section -->
-                            <div id="model-selection-section" class="highlight-box">
-                                <div class="highlight-box__row">
-                                    <div class="form-group inline">
-                                        <label for="model-select" class="form-label">Active Model:</label>
-                                        <select id="model-select" name="model_selector" class="form-select wide">
-                                            <option value="small.en">Whisper small EN</option>
-                                        </select>
+                            <div class="form-group">
+                                <label for="bad-words-textarea" class="form-label">Bad Words to Censor</label>
+                                <p class="form-hint mb-2">
+                                    Enter words to censor, separated by commas. Leave blank to use default list.
+                                </p>
+                                <div class="textarea-wrapper">
+                                    <textarea name="bad_words" id="bad-words-textarea" rows="4" class="form-textarea"
+                                        placeholder="fuck, shit, damn, ..."></textarea>
+                                    <div class="textarea-counter">
+                                        <span id="words-count">0</span> Words
                                     </div>
-                                    <div id="model-status" class="model-status">
-                                        <span id="model-status-indicator" class="status-dot neutral"></span>
-                                        <span id="model-status-text" class="model-status__text">Checking model...</span>
-                                    </div>
-                                    <button id="apply-model-btn" type="button" class="btn secondary wide hidden">
-                                        <svg class="btn__icon" xmlns="http://www.w3.org/2000/svg" fill="none"
-                                            viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
-                                            <path stroke-linecap="round" stroke-linejoin="round"
-                                                d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182m0-4.991v4.99" />
-                                        </svg>
-                                        Apply & Restart
-                                    </button>
                                 </div>
                             </div>
 
                             <div class="form-group">
-                                <label for="text" class="form-label">Text to synthesize</label>
+                                <label for="audio-file-input" class="form-label">Audio File to Censor</label>
                                 <p class="form-hint mb-2">
-                                    Enter the text you want to convert to speech. For audiobooks, you can paste long
-                                    chapters.
+                                    Upload an audio file (.wav, .mp3, .m4a, .flac, .ogg). Drag & drop or click to browse.
                                 </p>
-                                <div class="textarea-wrapper">
-                                    <textarea name="text" id="text" rows="8" class="form-textarea"
-                                        placeholder="Enter text here..." required></textarea>
-                                    <div class="textarea-counter">
-                                        <span id="char-count">0</span> Characters
+                                <div id="audio-drop-zone" class="file-drop-zone">
+                                    <svg class="file-drop-zone__icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+                                        <path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5m-13.5-9L12 3m0 0 4.5 4.5M12 3v13.5" />
+                                    </svg>
+                                    <p class="file-drop-zone__text">
+                                        <span class="file-drop-zone__browse">Click to upload</span> or drag and drop
+                                    </p>
+                                    <p class="file-drop-zone__hint">WAV, MP3, M4A, FLAC, OGG (max 100MB)</p>
+                                    <input type="file" id="audio-file-input" accept=".wav,.mp3,.m4a,.flac,.ogg" class="hidden" />
+                                </div>
+                                <div id="file-info" class="file-info hidden">
+                                    <svg class="file-info__icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+                                        <path stroke-linecap="round" stroke-linejoin="round" d="M9 9l10.5-3m0 6.553v3.75a2.25 2.25 0 01-1.632 2.163l-1.32.377a1.803 1.803 0 11-.99-3.467l2.31-.66a2.25 2.25 0 001.632-2.163zm0 0V2.25L9 5.25v10.303m0 0v3.75a2.25 2.25 0 01-1.632 2.163l-1.32.377a1.803 1.803 0 01-.99-3.467l2.31-.66A2.25 2.25 0 009 15.553z" />
+                                    </svg>
+                                    <div class="file-info__details">
+                                        <p class="file-info__name" id="file-name">No file selected</p>
+                                        <p class="file-info__size" id="file-size"></p>
                                     </div>
+                                    <button type="button" id="remove-file-btn" class="file-info__remove" title="Remove file">
+                                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+                                            <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+                                        </svg>
+                                    </button>
                                 </div>
                             </div>
 
                             <div class="flex-row flex-wrap items-center gap-4 mb-6">
-                                <button type="button" id="generate-btn" class="btn primary">
+                                <button type="button" id="generate-btn" class="btn primary" disabled>
                                     <svg class="btn__icon" xmlns="http://www.w3.org/2000/svg" fill="none"
                                         viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
                                         <path stroke-linecap="round" stroke-linejoin="round"
                                             d="M19.114 5.636a9 9 0 0 1 0 12.728M16.463 8.288a5.25 5.25 0 0 1 0 7.424M6.75 8.25l4.72-4.72a.75.75 0 0 1 1.28.53v15.88a.75.75 0 0 1-1.28.53l-4.72-4.72H4.51c-.88 0-1.704-.507-1.938-1.354A9.009 9.009 0 0 1 2.25 12c0-.83.112-1.633.322-2.396C2.806 8.756 3.63 8.25 4.51 8.25H6.75Z" />
                                     </svg>
-                                    Beep Sync
+                                    Censor Audio
                                 </button>
                             </div>
                     </form>
@@ -139,6 +145,34 @@
     </div>
 
     <!-- Chunk Warning Modal -->
+    <div id="result-modal" class="modal hidden opacity-0" data-state="closed" style="display: none;">
+        <div class="modal__box">
+            <h3 class="modal__title">Censorship Results</h3>
+            <div class="modal__content">
+                <p id="result-message">Processing complete!</p>
+                <ul id="result-details" class="tips-list">
+                </ul>
+            </div>
+            <div class="modal__actions">
+                <button id="result-ok-btn" type="button" class="btn primary">OK</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Error Modal -->
+    <div id="error-modal" class="modal hidden opacity-0" data-state="closed" style="display: none;">
+        <div class="modal__box">
+            <h3 class="modal__title">Error</h3>
+            <div class="modal__content">
+                <p id="error-message">An error occurred.</p>
+            </div>
+            <div class="modal__actions">
+                <button id="error-ok-btn" type="button" class="btn primary">OK</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Original Chunk Warning Modal (kept for compatibility) -->
     <div id="chunk-warning-modal" class="modal hidden opacity-0" data-state="closed" style="display: none;">
         <div class="modal__box">
             <h3 class="modal__title">Chunking Voice Consistency Warning</h3>

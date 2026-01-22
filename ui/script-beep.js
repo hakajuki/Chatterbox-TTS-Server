@@ -1,38 +1,39 @@
 // ui/script-beep.js
-// Minimal client-side JavaScript for index-beep.html (Beep Sync TTS Server).
-// Handles basic UI interactions, theme toggle, notifications, and simple TTS generation.
+// Client-side JavaScript for index-beep.html (Beep Sync Audio Censorship Tool).
+// Handles file upload, bad words input, and audio censorship via /api/censor endpoint.
 
 document.addEventListener('DOMContentLoaded', function () {
     // --- Configuration ---
     const IS_LOCAL_FILE = window.location.protocol === 'file:';
-    const API_BASE_URL = IS_LOCAL_FILE ? 'http://localhost:8004' : '';
+    const API_BASE_URL = IS_LOCAL_FILE ? 'http://localhost:8005' : '';
 
     // --- State ---
-    let hideChunkWarning = false;
-    let hideGenerationWarning = false;
+    let selectedFile = null;
     let currentAbortController = null;
 
     // --- DOM Element Selectors ---
     const themeToggleButton = document.getElementById('theme-toggle-btn');
     const notificationArea = document.getElementById('notification-area');
-    const textArea = document.getElementById('text');
-    const charCount = document.getElementById('char-count');
+    const badWordsTextarea = document.getElementById('bad-words-textarea');
+    const wordsCount = document.getElementById('words-count');
+    const audioDropZone = document.getElementById('audio-drop-zone');
+    const audioFileInput = document.getElementById('audio-file-input');
+    const fileInfo = document.getElementById('file-info');
+    const fileName = document.getElementById('file-name');
+    const fileSize = document.getElementById('file-size');
+    const removeFileBtn = document.getElementById('remove-file-btn');
     const generateBtn = document.getElementById('generate-btn');
-    const modelSelect = document.getElementById('model-select');
-    const modelStatusIndicator = document.getElementById('model-status-indicator');
-    const modelStatusText = document.getElementById('model-status-text');
-    const applyModelBtn = document.getElementById('apply-model-btn');
     const audioPlayerContainer = document.getElementById('audio-player-container');
     const loadingOverlay = document.getElementById('loading-overlay');
     const loadingMessage = document.getElementById('loading-message');
     const loadingCancelBtn = document.getElementById('loading-cancel-btn');
-    const chunkWarningModal = document.getElementById('chunk-warning-modal');
-    const chunkWarningOkBtn = document.getElementById('chunk-warning-ok');
-    const chunkWarningCancelBtn = document.getElementById('chunk-warning-cancel');
-    const hideChunkWarningCheckbox = document.getElementById('hide-chunk-warning-checkbox');
-    const generationWarningModal = document.getElementById('generation-warning-modal');
-    const generationWarningAcknowledgeBtn = document.getElementById('generation-warning-acknowledge');
-    const hideGenerationWarningCheckbox = document.getElementById('hide-generation-warning-checkbox');
+    const resultModal = document.getElementById('result-modal');
+    const resultMessage = document.getElementById('result-message');
+    const resultDetails = document.getElementById('result-details');
+    const resultOkBtn = document.getElementById('result-ok-btn');
+    const errorModal = document.getElementById('error-modal');
+    const errorMessage = document.getElementById('error-message');
+    const errorOkBtn = document.getElementById('error-ok-btn');
 
     // --- Utility Functions ---
     function showNotification(message, type = 'info', duration = 4000) {
@@ -100,8 +101,100 @@ document.addEventListener('DOMContentLoaded', function () {
     const savedTheme = localStorage.getItem('uiTheme') || 'dark';
     applyTheme(savedTheme);
 
-    // --- Character Counter ---
-    if (textArea && charCount) {
+    // --- Word Counter for Bad Words ---
+    if (badWordsTextarea && wordsCount) {
+        function updateWordCount() {
+            const text = badWordsTextarea.value.trim();
+            const words = text ? text.split(',').filter(w => w.trim()).length : 0;
+            wordsCount.textContent = words;
+        }
+        badWordsTextarea.addEventListener('input', updateWordCount);
+        updateWordCount();
+    }
+
+    // --- File Upload Handling ---
+    function formatFileSize(bytes) {
+        if (bytes === 0) return '0 Bytes';
+        const k = 1024;
+        const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+        const i = Math.floor(Math.log(bytes) / Math.log(k));
+        return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i];
+    }
+
+    function handleFileSelect(file) {
+        if (!file) return;
+
+        const maxSize = 100 * 1024 * 1024; // 100MB
+        if (file.size > maxSize) {
+            showNotification('File too large. Maximum size is 100MB.', 'error');
+            return;
+        }
+
+        const allowedTypes = ['audio/wav', 'audio/mpeg', 'audio/mp4', 'audio/x-m4a', 'audio/flac', 'audio/ogg'];
+        const allowedExtensions = ['.wav', '.mp3', '.m4a', '.flac', '.ogg'];
+        const fileExt = '.' + file.name.split('.').pop().toLowerCase();
+        
+        if (!allowedTypes.includes(file.type) && !allowedExtensions.includes(fileExt)) {
+            showNotification('Invalid file type. Please upload a valid audio file.', 'error');
+            return;
+        }
+
+        selectedFile = file;
+        fileName.textContent = file.name;
+        fileSize.textContent = formatFileSize(file.size);
+        audioDropZone.classList.add('hidden');
+        fileInfo.classList.remove('hidden');
+        generateBtn.disabled = false;
+        showNotification('File selected: ' + file.name, 'success', 3000);
+    }
+
+    function clearFileSelection() {
+        selectedFile = null;
+        fileName.textContent = 'No file selected';
+        fileSize.textContent = '';
+        audioDropZone.classList.remove('hidden');
+        fileInfo.classList.add('hidden');
+        generateBtn.disabled = true;
+        if (audioFileInput) audioFileInput.value = '';
+    }
+
+    // Drag & Drop handlers
+    if (audioDropZone && audioFileInput) {
+        audioDropZone.addEventListener('click', () => audioFileInput.click());
+        
+        audioDropZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            audioDropZone.classList.add('dragover');
+        });
+        
+        audioDropZone.addEventListener('dragleave', () => {
+            audioDropZone.classList.remove('dragover');
+        });
+        
+        audioDropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            audioDropZone.classList.remove('dragover');
+            const files = e.dataTransfer.files;
+            if (files.length > 0) {
+                handleFileSelect(files[0]);
+            }
+        });
+        
+        audioFileInput.addEventListener('change', (e) => {
+            if (e.target.files.length > 0) {
+                handleFileSelect(e.target.files[0]);
+            }
+        });
+    }
+
+    if (removeFileBtn) {
+        removeFileBtn.addEventListener('click', clearFileSelection);
+    }
+
+    // --- Character Counter (kept for compatibility if needed) ---
+    if (document.getElementById('text') && document.getElementById('char-count')) {
+        const textArea = document.getElementById('text');
+        const charCount = document.getElementById('char-count');
         textArea.addEventListener('input', () => {
             charCount.textContent = textArea.value.length;
         });
@@ -144,164 +237,166 @@ document.addEventListener('DOMContentLoaded', function () {
         }, 300);
     }
 
-    if (chunkWarningOkBtn) {
-        chunkWarningOkBtn.addEventListener('click', () => {
-            if (hideChunkWarningCheckbox && hideChunkWarningCheckbox.checked) {
-                hideChunkWarning = true;
-            }
-            hideModal(chunkWarningModal);
-        });
+    if (resultOkBtn) {
+        resultOkBtn.addEventListener('click', () => hideModal(resultModal));
     }
 
-    if (chunkWarningCancelBtn) {
-        chunkWarningCancelBtn.addEventListener('click', () => {
-            hideModal(chunkWarningModal);
-        });
-    }
-
-    if (generationWarningAcknowledgeBtn) {
-        generationWarningAcknowledgeBtn.addEventListener('click', () => {
-            if (hideGenerationWarningCheckbox && hideGenerationWarningCheckbox.checked) {
-                hideGenerationWarning = true;
-            }
-            hideModal(generationWarningModal);
-        });
+    if (errorOkBtn) {
+        errorOkBtn.addEventListener('click', () => hideModal(errorModal));
     }
 
     if (loadingCancelBtn) {
         loadingCancelBtn.addEventListener('click', () => {
             if (currentAbortController) {
                 currentAbortController.abort();
-                showNotification('Generation cancelled', 'warning');
+                showNotification('Request cancelled', 'warning');
             }
             hideLoading();
         });
     }
 
-    // --- Fetch Initial Data ---
-    async function fetchInitialData() {
-        try {
-            const response = await fetch(API_BASE_URL + '/api/ui/initial-data');
-            if (!response.ok) throw new Error('Failed to fetch initial data');
-            
-            const data = await response.json();
-
-            // Update model status
-            if (data.model && modelStatusText && modelStatusIndicator) {
-                modelStatusText.textContent = data.model.name || 'Model loaded';
-                modelStatusIndicator.className = 'status-dot success';
-            }
-
-            // Populate model selector
-            if (data.available_models && modelSelect) {
-                modelSelect.innerHTML = '';
-                data.available_models.forEach(model => {
-                    const option = document.createElement('option');
-                    option.value = model.id || model;
-                    option.textContent = model.name || model;
-                    modelSelect.appendChild(option);
-                });
-            }
-        } catch (error) {
-            console.error('Failed to fetch initial data:', error);
-            if (modelStatusText) modelStatusText.textContent = 'Failed to load model info';
-            if (modelStatusIndicator) modelStatusIndicator.className = 'status-dot error';
-        }
-    }
-
-    // --- Audio Player ---
-    function createAudioPlayer(blob) {
+    // --- Audio Player Creation ---
+    function createAudioPlayer(audioUrl, stats = {}) {
         if (!audioPlayerContainer) return;
-        
-        const url = URL.createObjectURL(blob);
-        audioPlayerContainer.innerHTML = `
-            <div class="card">
-                <div class="card__body">
-                    <h3 class="card__title">Generated Audio</h3>
-                    <audio controls style="width: 100%; margin-top: 1rem;">
-                        <source src="${url}" type="${blob.type}">
-                        Your browser does not support the audio element.
-                    </audio>
-                </div>
-            </div>
+
+        audioPlayerContainer.innerHTML = '';
+
+        const card = document.createElement('div');
+        card.className = 'card';
+
+        const cardBody = document.createElement('div');
+        cardBody.className = 'card__body';
+
+        const title = document.createElement('h3');
+        title.className = 'card__title';
+        title.textContent = 'Censored Audio Result';
+
+        const audio = document.createElement('audio');
+        audio.controls = true;
+        audio.className = 'audio-player';
+        audio.src = audioUrl;
+
+        const downloadBtn = document.createElement('a');
+        downloadBtn.href = audioUrl;
+        downloadBtn.download = 'censored_audio.wav';
+        downloadBtn.className = 'btn secondary';
+        downloadBtn.innerHTML = `
+            <svg class="btn__icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3" />
+            </svg>
+            Download Censored Audio
         `;
+
+        cardBody.appendChild(title);
+        cardBody.appendChild(audio);
         
-        const audioElement = audioPlayerContainer.querySelector('audio');
-        if (audioElement) {
-            audioElement.play().catch(() => {});
+        if (stats.detected_count !== undefined) {
+            const statsDiv = document.createElement('div');
+            statsDiv.className = 'form-hint mt-4';
+            statsDiv.innerHTML = `
+                <p><strong>Censorship Stats:</strong></p>
+                <ul class="tips-list">
+                    <li>Bad words detected: <strong>${stats.detected_count}</strong></li>
+                    <li>Groups censored: <strong>${stats.groups_censored || 0}</strong></li>
+                    ${stats.detected_words && stats.detected_words.length > 0 ? 
+                        `<li>Words found: ${stats.detected_words.join(', ')}</li>` : ''}
+                </ul>
+            `;
+            cardBody.appendChild(statsDiv);
         }
+        
+        cardBody.appendChild(downloadBtn);
+        card.appendChild(cardBody);
+        audioPlayerContainer.appendChild(card);
+
+        audio.play().catch(() => {});
     }
 
-    // --- TTS Generation ---
-    function getTTSFormData() {
-        return {
-            text: (textArea && textArea.value) ? textArea.value : ''
-        };
-    }
-
-    async function submitTTSRequest() {
-        if (!textArea || !textArea.value.trim()) {
-            showNotification('Please enter text to synthesize', 'warning');
+    // --- Censor Audio Request ---
+    async function submitCensorRequest() {
+        if (!selectedFile) {
+            showNotification('Please select an audio file first', 'error');
             return;
         }
 
-        showLoading();
+        const badWords = badWordsTextarea ? badWordsTextarea.value.trim() : '';
+        
+        showLoading('Processing audio...');
+        currentAbortController = new AbortController();
+
+        const formData = new FormData();
+        formData.append('audio_file', selectedFile);
+        formData.append('bad_words', badWords || 'fuck,shit,damn,bitch,asshole');
 
         try {
-            currentAbortController = new AbortController();
-            
-            const response = await fetch(API_BASE_URL + '/tts', {
+            const response = await fetch(API_BASE_URL + '/api/censor', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(getTTSFormData()),
+                body: formData,
                 signal: currentAbortController.signal
             });
 
+            hideLoading();
+
             if (!response.ok) {
-                const errorText = await response.text();
-                throw new Error(errorText || response.statusText);
+                const errorData = await response.json().catch(() => ({}));
+                throw new Error(errorData.detail || `Server error: ${response.status}`);
             }
 
-            const blob = await response.blob();
-            createAudioPlayer(blob);
-            showNotification('Audio generated successfully', 'success');
+            // Get stats from headers
+            const detectedCount = parseInt(response.headers.get('X-Detected-Count') || '0');
+            const groupsCensored = parseInt(response.headers.get('X-Groups-Censored') || '0');
+            const detectedWords = (response.headers.get('X-Detected-Words') || '').split(',').filter(w => w);
+
+            const audioBlob = await response.blob();
+            const audioUrl = URL.createObjectURL(audioBlob);
+
+            createAudioPlayer(audioUrl, {
+                detected_count: detectedCount,
+                groups_censored: groupsCensored,
+                detected_words: detectedWords
+            });
+
+            if (detectedCount === 0) {
+                showNotification('No profanity detected. Audio returned unchanged.', 'info');
+            } else {
+                showNotification(`Success! Censored ${detectedCount} bad word(s) in ${groupsCensored} region(s).`, 'success');
+            }
+
+            // Show result modal
+            if (resultModal && resultMessage && resultDetails) {
+                resultMessage.textContent = detectedCount === 0 ? 
+                    'No profanity detected in the audio.' :
+                    `Successfully censored ${detectedCount} bad word(s)!`;
+                
+                resultDetails.innerHTML = `
+                    <li>Bad words detected: <strong>${detectedCount}</strong></li>
+                    <li>Audio regions censored: <strong>${groupsCensored}</strong></li>
+                    ${detectedWords.length > 0 ? `<li>Words found: ${detectedWords.join(', ')}</li>` : ''}
+                `;
+                showModal(resultModal);
+            }
 
         } catch (error) {
-            if (error.name === 'AbortError') {
-                showNotification('Generation cancelled', 'warning');
-            } else {
-                showNotification('Generation failed: ' + (error.message || 'Unknown error'), 'error');
-                console.error('TTS generation error:', error);
-            }
-        } finally {
             hideLoading();
-            currentAbortController = null;
+            if (error.name === 'AbortError') {
+                showNotification('Request cancelled', 'warning');
+                return;
+            }
+            
+            console.error('Censorship error:', error);
+            showNotification('Error: ' + error.message, 'error');
+            
+            if (errorModal && errorMessage) {
+                errorMessage.textContent = error.message;
+                showModal(errorModal);
+            }
         }
     }
 
-    // --- Event Listeners ---
+    // --- Generate Button Handler ---
     if (generateBtn) {
-        generateBtn.addEventListener('click', submitTTSRequest);
+        generateBtn.addEventListener('click', submitCensorRequest);
     }
 
-    if (applyModelBtn && modelSelect) {
-        applyModelBtn.addEventListener('click', async () => {
-            showNotification('Applying model change (server restart may be required)', 'info', 3000);
-            try {
-                await fetch(API_BASE_URL + '/api/ui/set-model', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ model: modelSelect.value })
-                });
-                await fetchInitialData();
-                showNotification('Model applied successfully', 'success');
-            } catch (error) {
-                showNotification('Failed to apply model change', 'error');
-                console.error('Model change error:', error);
-            }
-        });
-    }
-
-    // --- Initialize ---
-    // fetchInitialData();
+    console.log('Beep Sync UI initialized');
 });
