@@ -45,7 +45,7 @@ ui_state:
   last_voice_mode: clone
   last_predefined_voice: Emily.wav
   last_reference_file: Gianna.wav
-  last_seed: 1947
+  last_seed: 0
   last_chunk_size: 240
   last_split_text_enabled: true
   hide_chunk_warning: false
