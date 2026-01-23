@@ -31,17 +31,27 @@ audio_output:
   max_reference_duration_sec: 30
   save_to_disk: false
 ui_state:
-  last_text: 'Listen to me. You are standing at the edge of something great. '
+  last_text: 'The rain hammered the city like it had a personal vendetta. I sat in
+    my office, the only light coming from a flickering neon sign outside that spelled
+    out "VACANCY" in letters as broken as most of my clients'' dreams. She walked
+    in at midnight, the kind of dame that made trouble look like a vacation destination.
+    Said her husband was missing. I knew right then this case would end with either
+    handcuffs or heartbreak. In this town, you learn not to tell the difference. I
+    took a long drag from my cigarette and watched the smoke curl up toward a ceiling
+    that had heard too many confessions. The night was young, but in this business,
+    everything ages fast.
+
+    '
   last_voice_mode: clone
   last_predefined_voice: Emily.wav
   last_reference_file: Gianna.wav
-  last_seed: 2025
+  last_seed: 1947
   last_chunk_size: 240
   last_split_text_enabled: true
   hide_chunk_warning: false
-  hide_generation_warning: false
+  hide_generation_warning: true
   theme: light
-  last_preset_name: Motivational Speech
+  last_preset_name: Noir Detective Monologue
 ui:
   title: Chatterbox TTS Server
   show_language_select: true

@@ -15,6 +15,7 @@ import numpy as np
 import librosa  # For potential direct use if needed, though utils.py handles most
 from pathlib import Path
 from contextlib import asynccontextmanager
+import asyncio
 from typing import Optional, List, Dict, Any, Literal
 import webbrowser  # For automatic browser opening
 import threading  # For automatic browser opening
@@ -66,6 +67,7 @@ from models import (  # Pydantic models
     UpdateStatusResponse,
 )
 import utils  # Utility functions
+from job_queue import get_job_queue, JobStatus, TTSJob  # Job queue system
 
 from pydantic import BaseModel, Field
 
@@ -134,6 +136,8 @@ def _delayed_browser_open(host: str, port: int):
 async def lifespan(app: FastAPI):
     """Manages application startup and shutdown events."""
     logger.info("TTS Server: Initializing application...")
+    job_q = get_job_queue()
+    
     try:
         logger.info(f"Configuration loaded. Log file at: {get_log_file_path()}")
 
@@ -163,6 +167,11 @@ async def lifespan(app: FastAPI):
             )
             browser_thread.start()
 
+        # Start job queue worker
+        job_q.set_processing_callback(process_tts_job)
+        await job_q.start()
+        logger.info("Job queue system initialized")
+
         logger.info("Application startup sequence complete.")
         startup_complete_event.set()
         yield
@@ -174,6 +183,8 @@ async def lifespan(app: FastAPI):
         yield
     finally:
         logger.info("TTS Server: Application shutdown sequence initiated...")
+        await job_q.stop()
+        logger.info("Job queue stopped")
         logger.info("TTS Server: Application shutdown complete.")
 
 
@@ -386,6 +397,161 @@ def _remove_dc_offset(
 
 
 # --- End Audio Stitching Helper Functions ---
+
+
+# --- TTS Job Processing Function ---
+
+async def process_tts_job(job: TTSJob) -> Dict[str, Any]:
+    """
+    Process a TTS job asynchronously.
+    This function contains the core TTS generation logic extracted from the /tts endpoint.
+    Returns a dict with output_path and output_format.
+    """
+    params = job.params
+    
+    # Convert params dict back to request-like object
+    class RequestParams:
+        def __init__(self, p):
+            for k, v in p.items():
+                setattr(self, k, v)
+    
+    request = RequestParams(params)
+    
+    perf_monitor = utils.PerformanceMonitor(
+        enabled=config_manager.get_bool("server.enable_performance_monitor", False)
+    )
+    perf_monitor.record("TTS job processing started")
+
+    # Resolve audio prompt path
+    audio_prompt_path_for_engine: Optional[Path] = None
+    if request.voice_mode == "predefined":
+        if not request.predefined_voice_id:
+            raise ValueError("Missing predefined_voice_id for predefined voice mode")
+        voices_dir = get_predefined_voices_path(ensure_absolute=True)
+        potential_path = voices_dir / request.predefined_voice_id
+        if not potential_path.is_file():
+            raise ValueError(f"Predefined voice file not found: {request.predefined_voice_id}")
+        audio_prompt_path_for_engine = potential_path
+
+    elif request.voice_mode == "clone":
+        if not request.reference_audio_filename:
+            raise ValueError("Missing reference_audio_filename for clone voice mode")
+        ref_dir = get_reference_audio_path(ensure_absolute=True)
+        potential_path = ref_dir / request.reference_audio_filename
+        if not potential_path.is_file():
+            raise ValueError(f"Reference audio file not found: {request.reference_audio_filename}")
+        audio_prompt_path_for_engine = potential_path
+
+    # Split text into chunks
+    all_audio_segments_np: List[np.ndarray] = []
+    engine_output_sample_rate: Optional[int] = None
+    
+    if request.split_text and len(request.text) > (request.chunk_size * 1.5 if request.chunk_size else 120 * 1.5):
+        chunk_size_to_use = request.chunk_size if request.chunk_size is not None else 120
+        text_chunks = utils.chunk_text_by_sentences(request.text, chunk_size_to_use)
+        job.total_chunks = len(text_chunks)
+    else:
+        text_chunks = [request.text]
+    
+    # Synthesize each chunk
+    for i, chunk in enumerate(text_chunks):
+        if job.status == JobStatus.CANCELLED:
+            raise RuntimeError("Job cancelled")
+        
+        job.current_chunk = i + 1
+        job.progress = int((i / len(text_chunks)) * 90)  # Leave 10% for encoding
+        # Offload engine synthesis to a thread to avoid blocking the event loop
+        chunk_audio_tensor, chunk_sr_from_engine = await asyncio.to_thread(
+            engine.synthesize,
+            text=chunk,
+            audio_prompt_path=(str(audio_prompt_path_for_engine) if audio_prompt_path_for_engine else None),
+            temperature=(request.temperature if request.temperature is not None else get_gen_default_temperature()),
+            exaggeration=(request.exaggeration if request.exaggeration is not None else get_gen_default_exaggeration()),
+            cfg_weight=(request.cfg_weight if request.cfg_weight is not None else get_gen_default_cfg_weight()),
+            seed=(request.seed if request.seed is not None else get_gen_default_seed()),
+        )
+
+        if chunk_audio_tensor is None or chunk_sr_from_engine is None:
+            raise RuntimeError(f"TTS engine failed for chunk {i+1}")
+
+        if engine_output_sample_rate is None:
+            engine_output_sample_rate = chunk_sr_from_engine
+
+        # Apply speed factor (offloaded if non-trivial)
+        speed_factor = request.speed_factor if request.speed_factor is not None else get_gen_default_speed_factor()
+        if speed_factor != 1.0:
+            current_processed_audio_tensor, _ = await asyncio.to_thread(
+                utils.apply_speed_factor, chunk_audio_tensor, chunk_sr_from_engine, speed_factor
+            )
+        else:
+            current_processed_audio_tensor = chunk_audio_tensor
+
+        # Convert tensor to numpy off-thread to avoid blocking
+        processed_audio_np = await asyncio.to_thread(
+            lambda t: t.cpu().numpy().squeeze(), current_processed_audio_tensor
+        )
+
+        all_audio_segments_np.append(processed_audio_np)
+    
+    if not all_audio_segments_np or engine_output_sample_rate is None:
+        raise RuntimeError("No audio generated")
+
+    # Offload the heavy post-processing (stitching, normalization, encoding, file I/O)
+    def _sync_finalize(segments, engine_sr, req_params, job_obj):
+        """Synchronous finalization: stitch, normalize, encode, save."""
+        # Stitch audio segments (synchronous)
+        if len(segments) == 1:
+            final_audio = segments[0]
+        else:
+            enable_smart_stitching = config_manager.get_bool("audio_processing.enable_crossfade", True)
+            if enable_smart_stitching:
+                CROSSFADE_MS = 20
+                SENTENCE_PAUSE_MS = 200
+                fade_samples = int(CROSSFADE_MS / 1000 * engine_sr)
+                silence_buffer_samples = int(SENTENCE_PAUSE_MS / 1000 * engine_sr) + (fade_samples * 2)
+
+                result = segments[0].astype(np.float32)
+                for seg in segments[1:]:
+                    silence = np.zeros(silence_buffer_samples, dtype=np.float32)
+                    result = _crossfade_with_overlap(result, silence, fade_samples)
+                    result = _crossfade_with_overlap(result, seg.astype(np.float32), fade_samples)
+                final_audio = result
+            else:
+                final_audio = np.concatenate([seg.astype(np.float32) for seg in segments])
+
+        # Normalize
+        peak = np.abs(final_audio).max()
+        if peak > 0.99:
+            final_audio = final_audio * (0.95 / peak)
+
+        # Encode
+        out_format = req_params.output_format if getattr(req_params, 'output_format', None) else get_audio_output_format()
+        target_sr = get_audio_sample_rate()
+        encoded = utils.encode_audio(
+            audio_array=final_audio,
+            sample_rate=engine_sr,
+            output_format=out_format,
+            target_sample_rate=target_sr,
+        )
+        if not encoded or len(encoded) < 100:
+            raise RuntimeError("Failed to encode audio during finalization")
+
+        # Save to disk
+        out_dir = get_output_path(ensure_absolute=True)
+        out_dir.mkdir(parents=True, exist_ok=True)
+        ts = time.strftime("%Y%m%d_%H%M%S")
+        fname = utils.sanitize_filename(f"tts_job_{job_obj.job_id}_{ts}.{out_format}")
+        out_path = out_dir / fname
+        out_path.write_bytes(encoded)
+
+        return {"output_path": out_path, "output_format": out_format}
+
+    # update progress before heavy finalization
+    job.progress = 95
+    result = await asyncio.to_thread(_sync_finalize, all_audio_segments_np, engine_output_sample_rate, request, job)
+
+    logger.info(f"Job {job.job_id} output saved: {result.get('output_path')}")
+    return result
 
 
 # --- Main UI Route ---
@@ -782,6 +948,106 @@ async def upload_predefined_voice_endpoint(files: List[UploadFile] = File(...)):
             f"Upload to /upload_predefined_voice completed with {len(upload_errors)} error(s)."
         )
     return JSONResponse(content=response_data, status_code=status_code)
+
+
+# --- TTS Job Queue Endpoints ---
+
+
+@app.post("/tts/enqueue", tags=["TTS Generation"], status_code=202)
+async def enqueue_tts_job(request: CustomTTSRequest):
+    """
+    Enqueue a TTS generation job for asynchronous processing.
+    Returns immediately with a job_id that can be used to check status and retrieve results.
+    """
+    if not engine.MODEL_LOADED:
+        raise HTTPException(
+            status_code=503,
+            detail="TTS engine model is not currently loaded or available.",
+        )
+    
+    logger.info(f"Enqueueing TTS job: mode='{request.voice_mode}', format='{request.output_format}'")
+    
+    # Convert request to dict for job params
+    job_params = request.dict()
+    
+    # Submit job to queue
+    job_queue = get_job_queue()
+    job_id = job_queue.submit_job(job_params)
+    
+    return {
+        "job_id": job_id,
+        "status": "queued",
+        "message": "Job queued for processing",
+        "status_url": f"/tts/{job_id}/status",
+        "result_url": f"/tts/{job_id}/result"
+    }
+
+
+@app.get("/tts/{job_id}/status", tags=["TTS Generation"])
+async def get_job_status(job_id: str):
+    """
+    Check the status of a TTS generation job.
+    Returns job progress, status, and metadata.
+    """
+    job_queue = get_job_queue()
+    job = job_queue.get_job(job_id)
+    
+    if not job:
+        raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+    
+    return job.to_dict()
+
+
+@app.get("/tts/{job_id}/result", tags=["TTS Generation"])
+async def get_job_result(job_id: str):
+    """
+    Retrieve the generated audio file for a completed job.
+    Returns audio stream if job is completed, otherwise returns error.
+    """
+    job_queue = get_job_queue()
+    job = job_queue.get_job(job_id)
+    
+    if not job:
+        raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+    
+    if job.status == JobStatus.QUEUED:
+        raise HTTPException(status_code=425, detail="Job is still queued")
+    
+    if job.status == JobStatus.RUNNING:
+        raise HTTPException(status_code=425, detail="Job is still processing")
+    
+    if job.status == JobStatus.FAILED:
+        raise HTTPException(status_code=500, detail=f"Job failed: {job.error}")
+    
+    if job.status == JobStatus.CANCELLED:
+        raise HTTPException(status_code=410, detail="Job was cancelled")
+    
+    if not job.output_path or not job.output_path.exists():
+        raise HTTPException(status_code=404, detail="Generated audio file not found")
+    
+    # Stream the audio file
+    media_type = f"audio/{job.output_format or 'wav'}"
+    headers = {
+        "Content-Disposition": f'attachment; filename="{job.output_path.name}"'
+    }
+    
+    return FileResponse(
+        path=str(job.output_path),
+        media_type=media_type,
+        headers=headers
+    )
+
+
+@app.delete("/tts/{job_id}", tags=["TTS Generation"])
+async def cancel_job(job_id: str):
+    """Cancel a queued or running TTS job"""
+    job_queue = get_job_queue()
+    success = job_queue.cancel_job(job_id)
+    
+    if not success:
+        raise HTTPException(status_code=404, detail="Job not found or cannot be cancelled")
+    
+    return {"message": f"Job {job_id} cancelled successfully"}
 
 
 # --- TTS Generation Endpoint ---

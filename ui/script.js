@@ -983,39 +983,200 @@ document.addEventListener('DOMContentLoaded', async function () {
         return jsonData;
     }
 
+    // Job queue polling state
+    let currentJobId = null;
+    let pollInterval = null;
+    let pollCount = 0;
+    const POLL_INTERVALS = [1000, 2000, 3000, 5000, 10000]; // Exponential backoff
+
     async function submitTTSRequest() {
         isGenerating = true;
         showLoadingOverlay();
+        updateLoadingStatus('Submitting job...', 0);
         const startTime = performance.now();
         const jsonData = getTTSFormData();
+        
         try {
-            const response = await fetch(`${API_BASE_URL}/tts`, {
+            // Enqueue the job instead of synchronous processing
+            const response = await fetch(`${API_BASE_URL}/tts/enqueue`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(jsonData)
             });
+            
             if (!response.ok) {
                 const errorResult = await response.json().catch(() => ({ detail: `HTTP error ${response.status}` }));
-                throw new Error(errorResult.detail || 'TTS generation failed.');
+                throw new Error(errorResult.detail || 'Failed to enqueue TTS job.');
             }
+            
+            const result = await response.json();
+            currentJobId = result.job_id;
+            
+            // Save job info to localStorage for recovery after refresh
+            localStorage.setItem('tts_current_job_id', currentJobId);
+            localStorage.setItem('tts_job_start_time', startTime.toString());
+            localStorage.setItem('tts_job_params', JSON.stringify({
+                voice_mode: jsonData.voice_mode,
+                predefined_voice_id: jsonData.predefined_voice_id,
+                reference_audio_filename: jsonData.reference_audio_filename
+            }));
+            
+            console.log(`Job ${currentJobId} queued successfully`);
+            updateLoadingStatus('Job queued, waiting to start...', 0);
+            
+            // Start polling for job status
+            pollCount = 0;
+            pollJobStatus();
+            
+        } catch (error) {
+            console.error('TTS Job Submission Error:', error);
+            showNotification(error.message || 'Failed to submit TTS job.', 'error');
+            isGenerating = false;
+            hideLoadingOverlay();
+            clearJobState();
+        }
+    }
+
+    async function pollJobStatus() {
+        if (!currentJobId) return;
+        
+        try {
+            const response = await fetch(`${API_BASE_URL}/tts/${currentJobId}/status`);
+            
+            if (!response.ok) {
+                throw new Error(`Failed to get job status: ${response.status}`);
+            }
+            
+            const status = await response.json();
+            console.log('Job status:', status);
+            
+            // Update UI based on status
+            if (status.status === 'queued') {
+                updateLoadingStatus('Job queued, waiting to start...', 0);
+                scheduleNextPoll();
+            } else if (status.status === 'running') {
+                const progress = status.progress || 0;
+                const chunkInfo = status.total_chunks > 0 
+                    ? ` (${status.current_chunk}/${status.total_chunks} chunks)`
+                    : '';
+                updateLoadingStatus(`Generating audio${chunkInfo}...`, progress);
+                scheduleNextPoll();
+            } else if (status.status === 'completed') {
+                // Job completed successfully
+                await handleJobComplete();
+            } else if (status.status === 'failed') {
+                throw new Error(status.error || 'Job failed');
+            } else if (status.status === 'cancelled') {
+                throw new Error('Job was cancelled');
+            }
+            
+        } catch (error) {
+            console.error('Job polling error:', error);
+            showNotification(error.message || 'Failed to check job status', 'error');
+            isGenerating = false;
+            hideLoadingOverlay();
+            clearJobState();
+        }
+    }
+
+    function scheduleNextPoll() {
+        // Clear any existing timeout
+        if (pollInterval) {
+            clearTimeout(pollInterval);
+        }
+        
+        // Get poll delay with exponential backoff
+        const delayIndex = Math.min(pollCount, POLL_INTERVALS.length - 1);
+        const delay = POLL_INTERVALS[delayIndex];
+        pollCount++;
+        
+        // Schedule next poll
+        pollInterval = setTimeout(pollJobStatus, delay);
+    }
+
+    async function handleJobComplete() {
+        if (!currentJobId) return;
+        
+        try {
+            updateLoadingStatus('Downloading result...', 100);
+            
+            // Fetch the generated audio
+            const response = await fetch(`${API_BASE_URL}/tts/${currentJobId}/result`);
+            
+            if (!response.ok) {
+                throw new Error(`Failed to download result: ${response.status}`);
+            }
+            
             const audioBlob = await response.blob();
+            const startTime = parseFloat(localStorage.getItem('tts_job_start_time') || '0');
             const endTime = performance.now();
-            const genTime = ((endTime - startTime) / 1000).toFixed(2);
-            const filenameFromServer = response.headers.get('Content-Disposition')?.split('filename=')[1]?.replace(/"/g, '') || 'generated_audio.wav';
+            const genTime = startTime > 0 ? ((endTime - startTime) / 1000).toFixed(2) : '0.00';
+            
+            const filenameFromServer = response.headers.get('Content-Disposition')
+                ?.split('filename=')[1]
+                ?.replace(/"/g, '') || 'generated_audio.wav';
+            
+            // Get saved job params
+            const savedParams = JSON.parse(localStorage.getItem('tts_job_params') || '{}');
+            
             const resultDetails = {
-                outputUrl: URL.createObjectURL(audioBlob), filename: filenameFromServer, genTime: genTime,
-                submittedVoiceMode: jsonData.voice_mode, submittedPredefinedVoice: jsonData.predefined_voice_id,
-                submittedCloneFile: jsonData.reference_audio_filename
+                outputUrl: URL.createObjectURL(audioBlob),
+                filename: filenameFromServer,
+                genTime: genTime,
+                submittedVoiceMode: savedParams.voice_mode,
+                submittedPredefinedVoice: savedParams.predefined_voice_id,
+                submittedCloneFile: savedParams.reference_audio_filename
             };
+            
             initializeWaveSurfer(resultDetails.outputUrl, resultDetails);
             showNotification('Audio generated successfully!', 'success');
+            
+            // Clean up
+            clearJobState();
+            
         } catch (error) {
-            console.error('TTS Generation Error:', error);
-            showNotification(error.message || 'An unknown error occurred during TTS generation.', 'error');
+            console.error('Failed to retrieve job result:', error);
+            showNotification(error.message || 'Failed to download generated audio', 'error');
+            clearJobState();
         } finally {
             isGenerating = false;
             hideLoadingOverlay();
         }
+    }
+
+    function updateLoadingStatus(message, progress) {
+        if (loadingStatusText) {
+            loadingStatusText.textContent = message;
+        }
+        if (loadingMessage && progress !== undefined) {
+            loadingMessage.textContent = `Generating audio... ${Math.round(progress)}%`;
+        }
+    }
+
+    function clearJobState() {
+        currentJobId = null;
+        pollCount = 0;
+        if (pollInterval) {
+            clearTimeout(pollInterval);
+            pollInterval = null;
+        }
+        localStorage.removeItem('tts_current_job_id');
+        localStorage.removeItem('tts_job_start_time');
+        localStorage.removeItem('tts_job_params');
+    }
+
+    // Resume job polling on page load if there's a saved job
+    async function resumeSavedJob() {
+        const savedJobId = localStorage.getItem('tts_current_job_id');
+        if (!savedJobId) return;
+        
+        console.log(`Found saved job ${savedJobId}, resuming...`);
+        currentJobId = savedJobId;
+        isGenerating = true;
+        showLoadingOverlay();
+        updateLoadingStatus('Resuming job...', 0);
+        pollCount = 0;
+        pollJobStatus();
     }
 
     function proceedWithSubmissionChecks() {
@@ -1115,8 +1276,31 @@ document.addEventListener('DOMContentLoaded', async function () {
         if (hideGenerationWarningCheckbox && hideGenerationWarningCheckbox.checked) hideGenerationWarning = true;
         hideGenerationWarningModal(); debouncedSaveState(); proceedWithSubmissionChecks();
     });
-    if (loadingCancelBtn) loadingCancelBtn.addEventListener('click', () => {
-        if (isGenerating) { isGenerating = false; hideLoadingOverlay(); showNotification("Generation UI cancelled by user.", "info"); }
+    if (loadingCancelBtn) loadingCancelBtn.addEventListener('click', async () => {
+        if (isGenerating && currentJobId) {
+            try {
+                // Cancel the job on the server
+                const response = await fetch(`${API_BASE_URL}/tts/${currentJobId}`, {
+                    method: 'DELETE'
+                });
+                if (response.ok) {
+                    showNotification("Job cancelled successfully.", "info");
+                } else {
+                    showNotification("Failed to cancel job on server.", "warning");
+                }
+            } catch (error) {
+                console.error('Failed to cancel job:', error);
+            }
+            // Clear local state regardless
+            isGenerating = false;
+            hideLoadingOverlay();
+            clearJobState();
+        } else if (isGenerating) {
+            // Fallback for legacy sync mode
+            isGenerating = false;
+            hideLoadingOverlay();
+            showNotification("Generation cancelled by user.", "info");
+        }
     });
     function showLoadingOverlay() {
         if (loadingOverlay && generateBtn && loadingCancelBtn) {
@@ -1390,4 +1574,7 @@ document.addEventListener('DOMContentLoaded', async function () {
     // Call fetchInitialData at the end of setup to kick everything off.
     // Note: This calls initializeApplication internally.
     await fetchInitialData();
+    
+    // After UI is loaded, check for any saved job to resume
+    await resumeSavedJob();
 });
