@@ -9,9 +9,9 @@ server:
   log_file_max_size_mb: 10
   log_file_backup_count: 5
 model:
-  repo_id: chatterbox
+  repo_id: chatterbox-turbo
 tts_engine:
-  device: cuda
+  device: mps
   predefined_voices_path: voices
   reference_audio_path: reference_audio
   default_voice_id: Emily.wav
@@ -31,17 +31,17 @@ audio_output:
   max_reference_duration_sec: 30
   save_to_disk: false
 ui_state:
-  last_text: '[gasp] Okay, we have fifteen minutes left! Fifteen minutes! [groan] '
+  last_text: 'Listen to me. You are standing at the edge of something great. '
   last_voice_mode: clone
   last_predefined_voice: Emily.wav
   last_reference_file: Gianna.wav
-  last_seed: 3000
-  last_chunk_size: 390
+  last_seed: 2025
+  last_chunk_size: 240
   last_split_text_enabled: true
   hide_chunk_warning: false
-  hide_generation_warning: true
+  hide_generation_warning: false
   theme: light
-  last_preset_name: "\u26A1 Turbo: Escape Room Panic"
+  last_preset_name: Motivational Speech
 ui:
   title: Chatterbox TTS Server
   show_language_select: true
