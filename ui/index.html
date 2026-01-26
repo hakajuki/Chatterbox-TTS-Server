@@ -123,7 +123,21 @@
                                 <p class="form-hint mt-2">Click a tag to insert it at your cursor position. Tags produce
                                     natural vocal reactions in the generated audio.</p>
                             </div>
-
+                            <div class="form-group">
+                                <div class="flex-row items-center">
+                                    <label for="censor-beep-toggle" class="checkbox-label">
+                                        <input type="checkbox" id="censor-beep-toggle" name="censor_enabled"
+                                            class="form-checkbox">
+                                        <span>Enable Censorship</span>
+                                    </label>
+                                </div>
+                                <div class="form-group">
+                                    <p class="form-hint mb-2">
+                                        Bad Words (comma-separated)
+                                    </p>
+                                    <textarea id="censor-bad-words" name="censor_bad_words" rows="1" class="form-textarea short" placeholder="e.g. fuck, shit, bitch"></textarea>
+                                </div>                                                            
+                            </div>
                             <div class="flex-row flex-wrap items-center gap-4 mb-6">
                                 <button type="button" id="generate-btn" class="btn primary">
                                     <svg class="btn__icon" xmlns="http://www.w3.org/2000/svg" fill="none"
@@ -133,6 +147,7 @@
                                     </svg>
                                     Generate Speech
                                 </button>
+                                   
                                 <label for="split-text-toggle" class="checkbox-label">
                                     <input type="checkbox" id="split-text-toggle" name="split_text"
                                         class="form-checkbox">
@@ -141,7 +156,7 @@
                                 <div id="chunk-size-controls" class="flex-row items-center gap-2 hidden">
                                     <label for="chunk-size-slider" class="form-label small">Chunk Size:</label>
                                     <input type="range" id="chunk-size-slider" name="chunk_size" min="50" max="1000"
-                                        step="10" value="120" class="form-slider short">
+                                        step="10" value="350" class="form-slider short">
                                     <span id="chunk-size-value" class="slider-value tabular-nums">120</span>
                                 </div>
                             </div>

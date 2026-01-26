@@ -95,6 +95,10 @@ document.addEventListener('DOMContentLoaded', async function () {
     const generationWarningAcknowledgeBtn = document.getElementById('generation-warning-acknowledge');
     const hideGenerationWarningCheckbox = document.getElementById('hide-generation-warning-checkbox');
 
+    // Censor UI elements
+    const censorBeepToggle = document.getElementById('censor-beep-toggle');
+    const censorBadWordsTextarea = document.getElementById('censor-bad-words');
+
     // Model-related elements
     const modelIndicator = document.getElementById('model-indicator');
     const modelBadge = document.getElementById('model-badge');
@@ -135,6 +139,23 @@ document.addEventListener('DOMContentLoaded', async function () {
         if (selectedOption) {
             selectedOption.classList.add('selected');
         }
+    }
+
+    // Hide censor bad-words input by default; toggle when checkbox is changed
+    try {
+        if (censorBadWordsTextarea && censorBadWordsTextarea.parentElement) {
+            censorBadWordsTextarea.parentElement.style.display = 'none';
+        }
+        if (censorBeepToggle) {
+            censorBeepToggle.addEventListener('change', function () {
+                const show = Boolean(censorBeepToggle.checked);
+                if (censorBadWordsTextarea && censorBadWordsTextarea.parentElement) {
+                    censorBadWordsTextarea.parentElement.style.display = show ? 'block' : 'none';
+                }
+            });
+        }
+    } catch (e) {
+        console.warn('Censor UI toggle initialization failed:', e);
     }
 
     // --- Utility Functions ---

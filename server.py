@@ -13,6 +13,9 @@ import uuid
 import yaml  # For loading presets
 import numpy as np
 import librosa  # For potential direct use if needed, though utils.py handles most
+import torch
+from faster_whisper import WhisperModel
+from pydub import AudioSegment
 from pathlib import Path
 from contextlib import asynccontextmanager
 import asyncio
@@ -72,6 +75,7 @@ from job_queue import get_job_queue, JobStatus, TTSJob  # Job queue system
 from pydantic import BaseModel, Field
 
 
+
 class OpenAISpeechRequest(BaseModel):
     model: str
     input_: str = Field(..., alias="input")
@@ -109,6 +113,20 @@ logger = logging.getLogger(__name__)
 # --- Global Variables & Application Setup ---
 startup_complete_event = threading.Event()  # For coordinating browser opening
 
+# --- ASR (Whisper) model for censorship (load once) ---
+DEFAULT_ASR_MODEL_SIZE = "small.en"
+try:
+    ASR_DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+    ASR_COMPUTE_TYPE = "float16" if ASR_DEVICE == "cuda" else "int8"
+    try:
+        logger.info(f"Loading ASR model '{DEFAULT_ASR_MODEL_SIZE}' for censorship (device={ASR_DEVICE})...")
+        asr_model = WhisperModel(DEFAULT_ASR_MODEL_SIZE, device=ASR_DEVICE, compute_type=ASR_COMPUTE_TYPE)
+        logger.info(f"ASR model '{DEFAULT_ASR_MODEL_SIZE}' loaded for censorship (device={ASR_DEVICE}).")
+    except Exception as e_asr:
+        logger.warning(f"Failed to initialize ASR model for censorship: {e_asr}")
+        asr_model = None
+except Exception:
+    asr_model = None
 
 def _delayed_browser_open(host: str, port: int):
     """
@@ -396,6 +414,130 @@ def _remove_dc_offset(
         return audio.astype(np.float32, copy=False)
 
 
+# --- Censorship helper (numpy in-memory) ---
+def censor_audio_with_beep(
+    audio_np: np.ndarray,
+    sample_rate: int,
+    bad_words: List[str],
+    beep_path: Optional[Path] = None,
+    min_gap_sec: float = 0.1,
+) -> tuple:
+    """
+    Censor `audio_np` (float32, mono, [-1,1]) by replacing detected bad words with beep audio.
+    Returns (censored_audio_np: np.ndarray, stats: dict).
+    """
+    stats = {
+        "status": "skipped",
+        "detected_count": 0,
+        "detected_words": [],
+        "groups_censored": 0,
+        "duration_sec": float(len(audio_np) / sample_rate) if sample_rate else 0.0,
+        "output_duration_sec": None,
+    }
+
+    if asr_model is None:
+        logger.warning("ASR model not available — skipping censorship.")
+        return audio_np, stats
+
+    try:
+        # Ensure mono 1D float32 in [-1,1]
+        arr = audio_np.astype(np.float32, copy=False)
+        if arr.ndim > 1:
+            arr = arr.mean(axis=1).astype(np.float32)
+
+        # Transcribe with word timestamps using in-memory audio
+        try:
+            segments, info = asr_model.transcribe((arr, sample_rate), word_timestamps=True, language="en")
+        except TypeError:
+            # fallback API shape
+            segments, info = asr_model.transcribe(arr, word_timestamps=True, language="en")
+
+        bad_timestamps = []
+        detected_words = []
+        for segment in segments:
+            for w in getattr(segment, "words", []):
+                word = w.word.strip().lower().rstrip('.,!?')
+                if word in [bw.lower() for bw in bad_words]:
+                    bad_timestamps.append((w.start, w.end))
+                    detected_words.append(word)
+                    logger.debug(f"Detected bad word '{word}' at {w.start}-{w.end}")
+
+        stats["detected_count"] = len(bad_timestamps)
+        stats["detected_words"] = list(set(detected_words))
+
+        if not bad_timestamps:
+            stats["status"] = "no_matches"
+            stats["output_duration_sec"] = len(arr) / sample_rate
+            return arr, stats
+
+        # Merge close timestamps
+        bad_timestamps.sort(key=lambda x: x[0])
+        merged = []
+        cs, ce = bad_timestamps[0]
+        for s, e in bad_timestamps[1:]:
+            if s - ce <= min_gap_sec:
+                ce = max(ce, e)
+            else:
+                merged.append((cs, ce))
+                cs, ce = s, e
+        merged.append((cs, ce))
+
+        # Convert numpy -> AudioSegment (int16 PCM)
+        int16_samples = (np.clip(arr, -1.0, 1.0) * 32767.0).astype(np.int16)
+        raw = int16_samples.tobytes()
+        audio_seg = AudioSegment(data=raw, sample_width=2, frame_rate=sample_rate, channels=1)
+
+        # Load beep
+        if not beep_path:
+            beep_path = Path(__file__).parent / "beep" / "assets" / "censor-beep.wav"
+        if not Path(beep_path).exists():
+            beep = AudioSegment.silent(duration=200, frame_rate=sample_rate)
+        else:
+            beep = AudioSegment.from_file(str(beep_path))
+
+        beep_ms = len(beep)
+
+        # Apply beep replacements (work backwards to avoid index shifts)
+        offset_ms = 0
+        censored = audio_seg
+        for start_sec, end_sec in sorted(merged, reverse=True):
+            gs = int(start_sec * 1000)
+            ge = int(end_sec * 1000)
+            duration_ms = ge - gs
+            if duration_ms <= 0:
+                continue
+            if duration_ms <= beep_ms:
+                beep_segment = beep[:duration_ms]
+            else:
+                repeats = duration_ms // beep_ms
+                remainder = duration_ms % beep_ms
+                beep_segment = beep * repeats
+                if remainder > 0:
+                    beep_segment += beep[:remainder]
+
+            before = censored[:gs]
+            after = censored[gs + duration_ms:]
+            censored = before + beep_segment + after
+
+        # Convert back to numpy float32
+        raw2 = censored.raw_data
+        arr16 = np.frombuffer(raw2, dtype=np.int16)
+        if censored.channels > 1:
+            arr16 = arr16.reshape((-1, censored.channels)).mean(axis=1).astype(np.int16)
+        out_np = (arr16.astype(np.float32) / 32768.0).astype(np.float32)
+
+        stats["groups_censored"] = len(merged)
+        stats["status"] = "success"
+        stats["output_duration_sec"] = len(out_np) / sample_rate
+        return out_np, stats
+
+    except Exception as e:
+        logger.error(f"Error in censor_audio_with_beep: {e}", exc_info=True)
+        stats["status"] = "failed"
+        stats["error"] = str(e)
+        return audio_np, stats
+
+
 # --- End Audio Stitching Helper Functions ---
 
 
@@ -524,6 +666,36 @@ async def process_tts_job(job: TTSJob) -> Dict[str, Any]:
         if peak > 0.99:
             final_audio = final_audio * (0.95 / peak)
 
+        # Optional censorship step (replace bad words with beep) — runs before encoding
+        censor_stats = {
+            "status": "skipped",
+            "detected_count": 0,
+            "detected_words": [],
+            "groups_censored": 0,
+        }
+
+        censor_enabled = False
+        try:
+            censor_enabled = bool(getattr(req_params, "censor_beep", False)) or bool(job_obj.params.get("censor_beep", False))
+        except Exception:
+            censor_enabled = False
+
+        bad_words_csv = ""
+        try:
+            bad_words_csv = getattr(req_params, "censor_bad_words", "") or job_obj.params.get("censor_bad_words", "")
+        except Exception:
+            bad_words_csv = ""
+
+        if censor_enabled and bad_words_csv:
+            bad_words_list = [w.strip().lower() for w in str(bad_words_csv).split(",") if w.strip()]
+            if bad_words_list:
+                try:
+                    final_audio, censor_stats = censor_audio_with_beep(final_audio, engine_sr, bad_words_list)
+                    logger.info(f"Applied censoring for job {job_obj.job_id}: {censor_stats.get('detected_count', 0)} matches")
+                except Exception as e_censor:
+                    logger.error(f"Censorship failed for job {job_obj.job_id}: {e_censor}", exc_info=True)
+                    censor_stats = {"status": "failed", "error": str(e_censor)}
+
         # Encode
         out_format = req_params.output_format if getattr(req_params, 'output_format', None) else get_audio_output_format()
         target_sr = get_audio_sample_rate()
@@ -544,7 +716,7 @@ async def process_tts_job(job: TTSJob) -> Dict[str, Any]:
         out_path = out_dir / fname
         out_path.write_bytes(encoded)
 
-        return {"output_path": out_path, "output_format": out_format}
+        return {"output_path": out_path, "output_format": out_format, "censor_stats": censor_stats}
 
     # update progress before heavy finalization
     job.progress = 95
@@ -954,7 +1126,7 @@ async def upload_predefined_voice_endpoint(files: List[UploadFile] = File(...)):
 
 
 @app.post("/tts/enqueue", tags=["TTS Generation"], status_code=202)
-async def enqueue_tts_job(request: CustomTTSRequest):
+async def enqueue_tts_job(request: CustomTTSRequest, http_request: Request):
     """
     Enqueue a TTS generation job for asynchronous processing.
     Returns immediately with a job_id that can be used to check status and retrieve results.
@@ -969,6 +1141,28 @@ async def enqueue_tts_job(request: CustomTTSRequest):
     
     # Convert request to dict for job params
     job_params = request.dict()
+
+    # Extract optional censoring fields from raw JSON (backwards-compatible)
+    try:
+        raw_json = await http_request.json()
+    except Exception:
+        raw_json = {}
+
+    def _coerce_bool(v):
+        if isinstance(v, bool):
+            return v
+        if isinstance(v, str):
+            return v.lower() in ("1", "true", "yes", "on")
+        return bool(v)
+
+    censor_beep_val = raw_json.get("censor_beep", job_params.get("censor_beep", False))
+    censor_bad_words_val = raw_json.get("censor_bad_words", job_params.get("censor_bad_words", ""))
+
+    job_params["censor_beep"] = _coerce_bool(censor_beep_val)
+    if isinstance(censor_bad_words_val, list):
+        job_params["censor_bad_words"] = ",".join([str(x).strip() for x in censor_bad_words_val])
+    else:
+        job_params["censor_bad_words"] = str(censor_bad_words_val).strip()
     
     # Submit job to queue
     job_queue = get_job_queue()

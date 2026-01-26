@@ -326,7 +326,7 @@ async def health_check():
 
 if __name__ == "__main__":
     host = "0.0.0.0"
-    port = 8005
+    port = 80
     
     logger.info(f"Starting Beep Sync Server on http://{host}:{port}")
     logger.info(f"Web UI: http://localhost:{port}/")

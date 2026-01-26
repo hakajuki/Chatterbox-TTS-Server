@@ -288,8 +288,27 @@ def load_model() -> bool:
                     f"Turbo model supports paralinguistic tags: {TURBO_PARALINGUISTIC_TAGS}"
                 )
 
-            # Load the model using from_pretrained - handles HuggingFace downloads automatically
-            chatterbox_model = model_class.from_pretrained(device=model_device)
+            # Prefer loading from a local `pretrained_model/` folder if present
+            # The folder names we check are `chatterbox` for the original model
+            # and `chatterbox-turbo` for the turbo model.
+            pretrained_root = Path('pretrained_models')
+            local_model_folder_name = 'chatterbox-turbo' if model_type == 'turbo' else 'chatterbox'
+            local_model_path = pretrained_root / local_model_folder_name
+
+            if local_model_path.exists():
+                logger.info(f"Found local pretrained model at {local_model_path}. Attempting to load from local path.")
+                try:
+                    # Attempt to load using the local path first
+                    chatterbox_model = model_class.from_local(str(local_model_path), device=model_device)
+                except Exception as e_local:
+                    logger.warning(
+                        f"Failed to load model from local path {local_model_path}: {e_local}. Falling back to remote from_pretrained()",
+                        exc_info=True,
+                    )
+                    chatterbox_model = model_class.from_pretrained(device=model_device)
+            else:
+                logger.info("No local pretrained model found; loading via from_pretrained (HuggingFace).")
+                chatterbox_model = model_class.from_pretrained(device=model_device)
 
             # Store model metadata
             loaded_model_type = model_type

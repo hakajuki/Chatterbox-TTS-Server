@@ -46,3 +46,4 @@ htmlcov/
 
 # Ignore log files
 *.log
+pretrained_models/
