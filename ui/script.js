@@ -1001,6 +1001,17 @@ document.addEventListener('DOMContentLoaded', async function () {
         } else if (currentVoiceMode === 'clone' && cloneReferenceSelect.value !== 'none') {
             jsonData.reference_audio_filename = cloneReferenceSelect.value;
         }
+        // Include censor options if present
+        try {
+            if (censorBeepToggle) {
+                jsonData.censor_beep = Boolean(censorBeepToggle.checked);
+                if (jsonData.censor_beep && censorBadWordsTextarea) {
+                    jsonData.censor_bad_words = (censorBadWordsTextarea.value || '').trim();
+                }
+            }
+        } catch (e) {
+            console.warn('Failed to read censor fields:', e);
+        }
         return jsonData;
     }
 
